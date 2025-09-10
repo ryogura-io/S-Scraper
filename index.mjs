@@ -145,8 +145,6 @@ const chromePath = await getChromePath();
 const browser = await puppeteer.launch({
   headless: true,
   args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  defaultViewport: null,
-  executablePath: chromePath || undefined,
 });
 
 allCards = await loadFromJsonBin();
