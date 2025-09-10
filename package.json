@@ -1,1 +1,14 @@
+{
+  "name": "shoob-scraper",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "puppeteer": "^22.15.0",
+    "node-fetch": "^3.3.2"
+  }
+}
 
