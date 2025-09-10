@@ -1,59 +1,83 @@
 // index.mjs
 import fs from "fs";
-import path from "path";
 import puppeteer from "puppeteer";
-import AWS from "aws-sdk";
+import path from "path";
+import fetch from "node-fetch";
 
 // --- CONFIG ---
-const TIERS = [1]; // Add other tiers if needed
-const PAGES_PER_TIER = { 1: 3 }; // Demo: 3 pages for tier 1
-const CONCURRENCY = 2; // Low concurrency for free instance
+const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
+const API_KEY = "$2a$10$SI/gpDvMkKnXWaJlKR4F9eUR9feh46FeWJS1Le/P3lgtrh2jDIbQK"; // X-Master-Key
+const DATA_FILE = "cards.json";            // optional local backup
+const TIERS = [1, 2];                      // add other tiers like [1,2,3,4,5,6,'S']
+const PAGES_PER_TIER = { 1: 120, 2: 120};     // how many pages per tier
+const CONCURRENCY = 3;                     // how many index pages to scrape in parallel
 
-// --- AWS S3 CONFIG ---
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION,
-});
-const BUCKET = process.env.S3_BUCKET || "your-bucket-name";
-const FILE_KEY = "cards.json";
+let allCards = [];
 
-// --- Helper: load cards from S3 ---
-async function loadCards() {
+// --- Fetch existing cards from JsonBin ---
+async function loadFromJsonBin() {
   try {
-    const data = await s3.getObject({ Bucket: BUCKET, Key: FILE_KEY }).promise();
-    return JSON.parse(data.Body.toString());
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: { "X-Master-Key": API_KEY },
+    });
+    if (!res.ok) throw new Error(`JsonBin load failed: ${res.status}`);
+    const json = await res.json();
+    return json.record || [];
   } catch (err) {
-    console.log("⚠️ No existing cards found on S3, starting fresh.");
+    console.log("⚠️ Could not load from JsonBin, starting fresh.", err.message);
     return [];
   }
 }
 
-// --- Helper: save cards to S3 ---
-async function saveCards(cards) {
-  await s3.putObject({
-    Bucket: BUCKET,
-    Key: FILE_KEY,
-    Body: JSON.stringify(cards, null, 2),
-    ContentType: "application/json",
-  }).promise();
-  console.log(`✅ Saved ${cards.length} cards to S3`);
+// --- Save to JsonBin ---
+async function saveToJsonBin(data) {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": API_KEY,
+    },
+    body: JSON.stringify(data, null, 2),
+  });
+
+  if (!res.ok) {
+    const error = await res.text();
+    console.error("❌ Failed to save to JsonBin:", error);
+  } else {
+    console.log("✅ Successfully saved to JsonBin");
+  }
+}
+
+// --- Detect system Chrome ---
+async function getChromePath() {
+  const possiblePaths = [
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe"),
+  ];
+
+  for (const p of possiblePaths) {
+    try {
+      fs.accessSync(p);
+      return p;
+    } catch {}
+  }
+
+  console.log("⚠️ Chrome not found, Puppeteer will use bundled Chromium.");
+  return null;
 }
 
 // --- Generate all index page URLs ---
-function generatePageUrls() {
-  const urls = [];
-  for (const tier of TIERS) {
-    const totalPages = PAGES_PER_TIER[tier];
-    for (let i = 1; i <= totalPages; i++) {
-      urls.push(`https://shoob.gg/cards?page=${i}&tier=${tier}`);
-    }
+const PAGE_URLS = [];
+for (const tier of TIERS) {
+  const totalPages = PAGES_PER_TIER[tier];
+  for (let i = 1; i <= totalPages; i++) {
+    PAGE_URLS.push(`https://shoob.gg/cards?page=${i}&tier=${tier}`);
   }
-  return urls;
 }
 
 // --- Scrape single card page ---
-async function scrapeCardPage(browser, url) {
+const scrapeCardPage = async (browser, url) => {
   const page = await browser.newPage();
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 20000 });
@@ -69,7 +93,7 @@ async function scrapeCardPage(browser, url) {
     });
 
     card.url = url;
-    console.log("✅ Scraped card:", card.name);
+    console.log("✅ Scraped card:", card);
     return card;
   } catch (err) {
     console.log(`⚠️ Failed scraping ${url}: ${err.message}`);
@@ -77,53 +101,74 @@ async function scrapeCardPage(browser, url) {
   } finally {
     await page.close();
   }
-}
+};
 
-// --- Main ---
-(async () => {
-  const browser = await puppeteer.launch({
-    headless: true,         // Must be headless for Render
-    args: ["--no-sandbox"], // Required on Render/Linux
-    defaultViewport: null,
-  });
-
-  const allCards = await loadCards();
-  const existingUrls = new Set(allCards.map(c => c.url));
+// --- Scrape all index pages with concurrency ---
+const scrapeAllPages = async (browser, existingUrls) => {
   const newCards = [];
-  const pageUrls = generatePageUrls();
+  const queue = [...PAGE_URLS];
 
-  // Simple concurrency queue
-  const queue = [...pageUrls];
-  const workers = Array.from({ length: CONCURRENCY }, () => (async () => {
-    while (queue.length > 0) {
-      const pageUrl = queue.shift();
-      const page = await browser.newPage();
-      try {
-        await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-        await page.waitForSelector("a[href^='/cards/info/']", { timeout: 15000 });
-        const cardLinks = await page.$$eval("a[href^='/cards/info/']", links => [...new Set(links.map(a => a.href))]);
-        await page.close();
+  const workers = Array.from({ length: CONCURRENCY }, () =>
+    (async () => {
+      while (queue.length > 0) {
+        const pageUrl = queue.shift();
+        const page = await browser.newPage();
+        try {
+          await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+          await page.waitForSelector("a[href^='/cards/info/']", { timeout: 15000 });
+          const cardLinks = await page.$$eval("a[href^='/cards/info/']", (links) =>
+            [...new Set(links.map((a) => a.href))]
+          );
+          await page.close();
 
-        for (const link of cardLinks) {
-          if (!existingUrls.has(link)) {
-            const card = await scrapeCardPage(browser, link);
-            newCards.push(card);
-            existingUrls.add(link);
+          for (const link of cardLinks) {
+            if (!existingUrls.has(link)) {
+              const card = await scrapeCardPage(browser, link);
+              newCards.push(card);
+              existingUrls.add(link);
+            }
           }
+        } catch (err) {
+          console.log(`⚠️ Failed scraping index page ${pageUrl}: ${err.message}`);
+          await page.close();
         }
-      } catch (err) {
-        console.log(`⚠️ Failed scraping index page ${pageUrl}: ${err.message}`);
-        await page.close();
       }
-    }
-  })());
+    })()
+  );
 
   await Promise.all(workers);
+  return newCards;
+};
 
-  allCards.push(...newCards);
-  await saveCards(allCards);
-  console.log(`✅ Added ${newCards.length} new cards — total now ${allCards.length}`);
+// --- Run scraper ---
+const chromePath = await getChromePath();
+const browser = await puppeteer.launch({
+  headless: true,
+  defaultViewport: null,
+  executablePath: chromePath || undefined,
+});
 
-  await browser.close();
-})();
+allCards = await loadFromJsonBin();
+console.log(`Loaded ${allCards.length} cards from JsonBin`);
+const existingUrls = new Set(allCards.map((c) => c.url));
 
+const newCards = await scrapeAllPages(browser, existingUrls);
+allCards.push(...newCards);
+
+fs.writeFileSync(DATA_FILE, JSON.stringify(allCards, null, 2)); // local backup
+console.log(`✅ Added ${newCards.length} new cards — total now ${allCards.length}`);
+
+await saveToJsonBin(allCards);
+await browser.close();
+
+// === Keep Alive Server ===
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("✅ Scraper bot is alive!");
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ Keep-alive server running on port ${PORT}`);
+});
