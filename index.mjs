@@ -3,14 +3,15 @@ import fs from "fs";
 import puppeteer from "puppeteer";
 import path from "path";
 import fetch from "node-fetch";
+import express from "express"; // ✅ added express
 
 // --- CONFIG ---
 const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
 const API_KEY = "$2a$10$SI/gpDvMkKnXWaJlKR4F9eUR9feh46FeWJS1Le/P3lgtrh2jDIbQK"; // X-Master-Key
-const DATA_FILE = "cards.json";            // optional local backup
-const TIERS = [1, 2];                      // add other tiers like [1,2,3,4,5,6,'S']
-const PAGES_PER_TIER = { 1: 120, 2: 120};     // how many pages per tier
-const CONCURRENCY = 3;                     // how many index pages to scrape in parallel
+const DATA_FILE = "cards.json"; // optional local backup
+const TIERS = [1, 2]; // add other tiers like [1,2,3,4,5,6,'S']
+const PAGES_PER_TIER = { 1: 120, 2: 120 }; // how many pages per tier
+const CONCURRENCY = 3; // how many index pages to scrape in parallel
 
 let allCards = [];
 
@@ -46,25 +47,6 @@ async function saveToJsonBin(data) {
   } else {
     console.log("✅ Successfully saved to JsonBin");
   }
-}
-
-// --- Detect system Chrome ---
-async function getChromePath() {
-  const possiblePaths = [
-    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-    path.join(process.env.LOCALAPPDATA || "", "Google\\Chrome\\Application\\chrome.exe"),
-  ];
-
-  for (const p of possiblePaths) {
-    try {
-      fs.accessSync(p);
-      return p;
-    } catch {}
-  }
-
-  console.log("⚠️ Chrome not found, Puppeteer will use bundled Chromium.");
-  return null;
 }
 
 // --- Generate all index page URLs ---
@@ -144,7 +126,7 @@ const scrapeAllPages = async (browser, existingUrls) => {
 const browser = await puppeteer.launch({
   headless: true,
   args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  executablePath: puppeteer.executablePath() 
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(), // ✅ use env var if provided
 });
 
 allCards = await loadFromJsonBin();
