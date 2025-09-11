@@ -2,7 +2,6 @@ import fs from "fs";
 import path from "path";
 import fetch from "node-fetch";
 import puppeteer from "puppeteer-core";
-import express from "express";
 
 // --- CONFIG ---
 const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
@@ -13,7 +12,7 @@ const PAGES_PER_TIER = { 1: 120, 2: 120 }; // how many pages per tier
 const CONCURRENCY = 3;                     // how many index pages to scrape in parallel
 
 // 🔹 Browserless WebSocket endpoint (replace with your API key)
-const BROWSERLESS_URL = "wss://chrome.browserless.io?token=2T1dG1hHsa77N4U1ab5819e9b84ab249fd87c778d50039d7e";
+const BROWSERLESS_URL = "wss://production-sfo.browserless.io?token=2T1dG1hHsa77N4U1ab5819e9b84ab249fd87c778d50039d7e";
 
 let allCards = [];
 
@@ -141,15 +140,3 @@ console.log(`✅ Added ${newCards.length} new cards — total now ${allCards.len
 
 await saveToJsonBin(allCards);
 await browser.close();
-
-// === Keep Alive Server ===
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get("/", (req, res) => {
-  res.send("✅ Scraper bot is alive!");
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Keep-alive server running on port ${PORT}`);
-});
