@@ -1,17 +1,19 @@
-// index.mjs
 import fs from "fs";
-import puppeteer from "puppeteer";
 import path from "path";
 import fetch from "node-fetch";
-import express from "express"; // ✅ added express
+import puppeteer from "puppeteer-core";
+import express from "express";
 
 // --- CONFIG ---
 const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
 const API_KEY = "$2a$10$SI/gpDvMkKnXWaJlKR4F9eUR9feh46FeWJS1Le/P3lgtrh2jDIbQK"; // X-Master-Key
-const DATA_FILE = "cards.json"; // optional local backup
-const TIERS = [1, 2]; // add other tiers like [1,2,3,4,5,6,'S']
+const DATA_FILE = "cards.json";            // optional local backup
+const TIERS = [1, 2];                      // add other tiers like [1,2,3,4,5,6,'S']
 const PAGES_PER_TIER = { 1: 120, 2: 120 }; // how many pages per tier
-const CONCURRENCY = 3; // how many index pages to scrape in parallel
+const CONCURRENCY = 3;                     // how many index pages to scrape in parallel
+
+// 🔹 Browserless WebSocket endpoint (replace with your API key)
+const BROWSERLESS_URL = "wss://chrome.browserless.io?token=2T1dG1hHsa77N4U1ab5819e9b84ab249fd87c778d50039d7e";
 
 let allCards = [];
 
@@ -123,10 +125,8 @@ const scrapeAllPages = async (browser, existingUrls) => {
 };
 
 // --- Run scraper ---
-const browser = await puppeteer.launch({
-  headless: true,
-  args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(), // ✅ use env var if provided
+const browser = await puppeteer.connect({
+  browserWSEndpoint: BROWSERLESS_URL,
 });
 
 allCards = await loadFromJsonBin();
