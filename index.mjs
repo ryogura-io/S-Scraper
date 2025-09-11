@@ -141,10 +141,10 @@ const scrapeAllPages = async (browser, existingUrls) => {
 };
 
 // --- Run scraper ---
-const chromePath = await getChromePath();
 const browser = await puppeteer.launch({
   headless: true,
-  args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  executablePath: puppeteer.executablePath() 
 });
 
 allCards = await loadFromJsonBin();
