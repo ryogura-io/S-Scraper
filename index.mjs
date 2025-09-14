@@ -2,13 +2,19 @@
 import fs from "fs";
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
+import express from "express";
 
 // --- CONFIG ---
+const SCRAPING_KEY = `4286856825214c16ad0606f43cd7a83a`; // your ScrapingAnt API key
 const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
 const API_KEY = "$2a$10$SI/gpDvMkKnXWaJlKR4F9eUR9feh46FeWJS1Le/P3lgtrh2jDIbQK"; // X-Master-Key
 const DATA_FILE = "cards.json";            // optional local backup
 const TIERS = [2];                      // add other tiers like [1,2,3,4,5,6,'S']
-const PAGES_PER_TIER = { 2 :40 };     // how many pages per tier
+// define [startPage, endPage] for each tier
+const PAGE_RANGES = {
+  2: [1, 30],   // scrape pages 1 → 30 of tier 2
+  // 3: [5, 20],    // scrape pages 5 → 20 of tier 3
+};
 
 // --- JsonBin Helpers ---
 async function loadFromJsonBin() {
@@ -43,11 +49,9 @@ async function saveToJsonBin(data) {
   }
 }
 
-const targetUrl = "https://shoob.gg/cards?page=1&tier=2";
-
 // --- ScrapingAnt request ---
 async function fetchHtml(url) {
-  const apiUrl = `https://api.scrapingant.com/v2/general?url=${encodeURIComponent(url)}&browser=true&wait=5000&x-api-key=4286856825214c16ad0606f43cd7a83a&wait_for_selector=.card-main`;
+  const apiUrl = `https://api.scrapingant.com/v2/general?url=${encodeURIComponent(url)}&browser=true&x-api-key=${SCRAPING_KEY}&wait_for_selector=.card-main`;
 
   const res = await fetch(apiUrl);
   if (!res.ok) throw new Error(`ScrapingAnt failed: ${res.status}`);
@@ -95,7 +99,8 @@ async function scrapeAllPages(existingUrls) {
   const newCards = [];
 
   for (const tier of TIERS) {
-    for (let i = 1; i <= PAGES_PER_TIER[tier]; i++) {
+    const [start, end] = PAGE_RANGES[tier];
+    for (let i = start; i <= end; i++) {
       const pageUrl = `https://shoob.gg/cards?page=${i}&tier=${tier}`;
       console.log(`🔹 Scraping index: ${pageUrl}`);
 
@@ -131,7 +136,7 @@ async function scrapeAllPages(existingUrls) {
 }
 
 // --- Run scraper ---
-(async () => {
+async function runScraper() {
   let allCards = await loadFromJsonBin();
   console.log(`Loaded ${allCards.length} cards from JsonBin`);
 
@@ -143,4 +148,19 @@ async function scrapeAllPages(existingUrls) {
   console.log(`✅ Added ${newCards.length} new cards — total now ${allCards.length}`);
 
   await saveToJsonBin(allCards);
-})();
+}
+
+// === Keep Alive Server ===
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("✅ Gura Shoob scraper is alive!");
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ Keep-alive server running on port ${PORT}`);
+
+  // run the scraper when the server starts
+  runScraper();
+});
