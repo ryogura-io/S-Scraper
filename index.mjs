@@ -1,22 +1,16 @@
+// index.mjs
 import fs from "fs";
-import path from "path";
 import fetch from "node-fetch";
-import puppeteer from "puppeteer-core";
+import * as cheerio from "cheerio";
 
 // --- CONFIG ---
 const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
 const API_KEY = "$2a$10$SI/gpDvMkKnXWaJlKR4F9eUR9feh46FeWJS1Le/P3lgtrh2jDIbQK"; // X-Master-Key
 const DATA_FILE = "cards.json";            // optional local backup
-const TIERS = [1, 2];                      // add other tiers like [1,2,3,4,5,6,'S']
-const PAGES_PER_TIER = { 1: 120, 2: 120 }; // how many pages per tier
-const CONCURRENCY = 3;                     // how many index pages to scrape in parallel
+const TIERS = [1, 2, 3];                      // add other tiers like [1,2,3,4,5,6,'S']
+const PAGES_PER_TIER = { 1: 794, 2:0, 3:0 };     // how many pages per tier
 
-// 🔹 Browserless WebSocket endpoint (replace with your API key)
-const BROWSERLESS_URL = "wss://production-sfo.browserless.io?token=2T1dG1hHsa77N4U1ab5819e9b84ab249fd87c778d50039d7e";
-
-let allCards = [];
-
-// --- Fetch existing cards from JsonBin ---
+// --- JsonBin Helpers ---
 async function loadFromJsonBin() {
   try {
     const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
@@ -31,7 +25,6 @@ async function loadFromJsonBin() {
   }
 }
 
-// --- Save to JsonBin ---
 async function saveToJsonBin(data) {
   const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
     method: "PUT",
@@ -50,93 +43,104 @@ async function saveToJsonBin(data) {
   }
 }
 
-// --- Generate all index page URLs ---
-const PAGE_URLS = [];
-for (const tier of TIERS) {
-  const totalPages = PAGES_PER_TIER[tier];
-  for (let i = 1; i <= totalPages; i++) {
-    PAGE_URLS.push(`https://shoob.gg/cards?page=${i}&tier=${tier}`);
-  }
+const targetUrl = "https://shoob.gg/cards?page=1&tier=2";
+
+// --- ScrapingAnt request ---
+async function fetchHtml(url) {
+  const apiUrl = `https://api.scrapingant.com/v2/general?url=${encodeURIComponent(url)}&browser=true&wait_for_selector=.card-main&x-api-key=4286856825214c16ad0606f43cd7a83a`;
+
+  const res = await fetch(apiUrl);
+  if (!res.ok) throw new Error(`ScrapingAnt failed: ${res.status}`);
+  return res.text();
 }
 
-// --- Scrape single card page ---
-const scrapeCardPage = async (browser, url) => {
-  const page = await browser.newPage();
+// --- Scrape a single card page ---
+async function scrapeCardPage(url) {
   try {
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 20000 });
-    await page.waitForSelector("ol.breadcrumb-new li:last-child span[itemprop='name']", { timeout: 15000 });
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
 
-    const card = await page.evaluate(() => {
-      const name = document.querySelector("ol.breadcrumb-new li:last-child span[itemprop='name']")?.textContent?.trim() || null;
-      const tier = document.querySelector("ol.breadcrumb-new li:nth-child(3) span[itemprop='name']")?.textContent?.trim() || null;
-      const series = document.querySelector("ol.breadcrumb-new li:nth-child(4) span[itemprop='name']")?.textContent?.trim() || null;
-      const img = document.querySelector(".cardData img.img-fluid")?.getAttribute("src") || null;
-      const maker = document.querySelector("p:has(span.padr5)")?.textContent?.replace("Card Maker:", "")?.trim() || null;
-      return { name, tier, series, img, maker };
-    });
+    const card = {
+      url,
+      name:
+        $("ol.breadcrumb-new li:last-child span[itemprop='name']")
+          .text()
+          ?.trim() || null,
+      tier:
+        $("ol.breadcrumb-new li:nth-child(3) span[itemprop='name']")
+          .text()
+          ?.trim() || null,
+      series:
+        $("ol.breadcrumb-new li:nth-child(4) span[itemprop='name']")
+          .text()
+          ?.trim() || null,
+      img: $(".cardData img.img-fluid").attr("src") || null,
+      maker:
+        $("p:has(span.padr5)")
+          .text()
+          ?.replace("Card Maker:", "")
+          ?.trim() || null,
+    };
 
-    card.url = url;
     console.log("✅ Scraped card:", card);
     return card;
   } catch (err) {
     console.log(`⚠️ Failed scraping ${url}: ${err.message}`);
     return { url, name: null, tier: null, series: null, img: null, maker: null };
-  } finally {
-    await page.close();
   }
-};
+}
 
-// --- Scrape all index pages with concurrency ---
-const scrapeAllPages = async (browser, existingUrls) => {
+// --- Scrape all index pages ---
+async function scrapeAllPages(existingUrls) {
   const newCards = [];
-  const queue = [...PAGE_URLS];
 
-  const workers = Array.from({ length: CONCURRENCY }, () =>
-    (async () => {
-      while (queue.length > 0) {
-        const pageUrl = queue.shift();
-        const page = await browser.newPage();
-        try {
-          await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-          await page.waitForSelector("a[href^='/cards/info/']", { timeout: 15000 });
-          const cardLinks = await page.$$eval("a[href^='/cards/info/']", (links) =>
-            [...new Set(links.map((a) => a.href))]
-          );
-          await page.close();
+  for (const tier of TIERS) {
+    for (let i = 1; i <= PAGES_PER_TIER[tier]; i++) {
+      const pageUrl = `https://shoob.gg/cards?page=${i}&tier=${tier}`;
+      console.log(`🔹 Scraping index: ${pageUrl}`);
 
-          for (const link of cardLinks) {
-            if (!existingUrls.has(link)) {
-              const card = await scrapeCardPage(browser, link);
-              newCards.push(card);
-              existingUrls.add(link);
-            }
+      try {
+        const html = await fetchHtml(pageUrl);
+        const $ = cheerio.load(html);
+
+        const cardLinks = [
+          ...new Set(
+            $("a[href^='/cards/info/']")
+              .map((_, a) => "https://shoob.gg" + $(a).attr("href"))
+              .get()
+          ),
+        ];
+
+        for (const link of cardLinks) {
+          if (!existingUrls.has(link)) {
+            const card = await scrapeCardPage(link);
+            newCards.push(card);
+            existingUrls.add(link);
+            await new Promise((r) => setTimeout(r, 800)); // small delay
           }
-        } catch (err) {
-          console.log(`⚠️ Failed scraping index page ${pageUrl}: ${err.message}`);
-          await page.close();
         }
+      } catch (err) {
+        console.log(`⚠️ Failed index page ${pageUrl}: ${err.message}`);
       }
-    })()
-  );
 
-  await Promise.all(workers);
+      await new Promise((r) => setTimeout(r, 1500)); // delay between index pages
+    }
+  }
+
   return newCards;
-};
+}
 
 // --- Run scraper ---
-const browser = await puppeteer.connect({
-  browserWSEndpoint: BROWSERLESS_URL,
-});
+(async () => {
+  let allCards = await loadFromJsonBin();
+  console.log(`Loaded ${allCards.length} cards from JsonBin`);
 
-allCards = await loadFromJsonBin();
-console.log(`Loaded ${allCards.length} cards from JsonBin`);
-const existingUrls = new Set(allCards.map((c) => c.url));
+  const existingUrls = new Set(allCards.map((c) => c.url));
+  const newCards = await scrapeAllPages(existingUrls);
 
-const newCards = await scrapeAllPages(browser, existingUrls);
-allCards.push(...newCards);
+  allCards.push(...newCards);
+  fs.writeFileSync(DATA_FILE, JSON.stringify(allCards, null, 2)); // local backup
+  console.log(`✅ Added ${newCards.length} new cards — total now ${allCards.length}`);
 
-fs.writeFileSync(DATA_FILE, JSON.stringify(allCards, null, 2)); // local backup
-console.log(`✅ Added ${newCards.length} new cards — total now ${allCards.length}`);
-
-await saveToJsonBin(allCards);
-await browser.close();
+  await saveToJsonBin(allCards);
+})();
