@@ -7,8 +7,8 @@ import * as cheerio from "cheerio";
 const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
 const API_KEY = "$2a$10$SI/gpDvMkKnXWaJlKR4F9eUR9feh46FeWJS1Le/P3lgtrh2jDIbQK"; // X-Master-Key
 const DATA_FILE = "cards.json";            // optional local backup
-const TIERS = [1, 2, 3];                      // add other tiers like [1,2,3,4,5,6,'S']
-const PAGES_PER_TIER = { 1: 794, 2:0, 3:0 };     // how many pages per tier
+const TIERS = [1];                      // add other tiers like [1,2,3,4,5,6,'S']
+const PAGES_PER_TIER = { 1: 790 };     // how many pages per tier
 
 // --- JsonBin Helpers ---
 async function loadFromJsonBin() {
@@ -47,7 +47,7 @@ const targetUrl = "https://shoob.gg/cards?page=1&tier=2";
 
 // --- ScrapingAnt request ---
 async function fetchHtml(url) {
-  const apiUrl = `https://api.scrapingant.com/v2/general?url=${encodeURIComponent(url)}&browser=true&wait_for_selector=.card-main&x-api-key=4286856825214c16ad0606f43cd7a83a`;
+  const apiUrl = `https://api.scrapingant.com/v2/general?url=${encodeURIComponent(url)}&browser=true&wait_for_selector=.card-main&wait=5000&x-api-key=4286856825214c16ad0606f43cd7a83a`;
 
   const res = await fetch(apiUrl);
   if (!res.ok) throw new Error(`ScrapingAnt failed: ${res.status}`);
