@@ -3,6 +3,8 @@ import fs from "fs";
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
 import express from "express";
+import path from "path";
+
 
 // --- CONFIG ---
 const SCRAPING_KEY = `4286856825214c16ad0606f43cd7a83a`; // your ScrapingAnt API key
@@ -156,6 +158,16 @@ const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
   res.send("✅ Gura Shoob scraper is alive!");
+});
+
+app.get("/download", (req, res) => {
+  const filePath = path.resolve("cards.json");
+  res.download(filePath, "cards.json", (err) => {
+    if (err) {
+      console.error("❌ Error sending file:", err);
+      res.status(500).send("Could not download file.");
+    }
+  });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
