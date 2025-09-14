@@ -8,7 +8,7 @@ const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
 const API_KEY = "$2a$10$SI/gpDvMkKnXWaJlKR4F9eUR9feh46FeWJS1Le/P3lgtrh2jDIbQK"; // X-Master-Key
 const DATA_FILE = "cards.json";            // optional local backup
 const TIERS = [1];                      // add other tiers like [1,2,3,4,5,6,'S']
-const PAGES_PER_TIER = { 1: 790 };     // how many pages per tier
+const PAGES_PER_TIER = { 1: 794 };     // how many pages per tier
 
 // --- JsonBin Helpers ---
 async function loadFromJsonBin() {
