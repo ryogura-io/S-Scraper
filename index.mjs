@@ -3,57 +3,37 @@ import fs from "fs";
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
 import express from "express";
-import path from "path";
-
+import { MongoClient } from "mongodb";
 
 // --- CONFIG ---
-const SCRAPING_KEY = `4286856825214c16ad0606f43cd7a83a`; // your ScrapingAnt API key
-const BIN_ID = "68c2021dae596e708fea4198"; // your JsonBin ID
-const API_KEY = "$2a$10$SI/gpDvMkKnXWaJlKR4F9eUR9feh46FeWJS1Le/P3lgtrh2jDIbQK"; // X-Master-Key
-const DATA_FILE = "cards.json";            // optional local backup
-const TIERS = [2];                      // add other tiers like [1,2,3,4,5,6,'S']
-// define [startPage, endPage] for each tier
+const SCRAPING_KEY = `802680f701144d6088b4bfb3501948a6`; // hmyeah
+const MONGO_URI = "mongodb+srv://Ryou:12345@shoob-cards.6bphku9.mongodb.net/?retryWrites=true&w=majority&appName=Shoob-Cards";
+const DB_NAME = "shoob";
+const COLLECTION_NAME = "cards";
+
+const DATA_FILE = "cards.json"; // optional local backup
+const TIERS = [1];              // add tiers like [1,2,3,4,5,6,'S']
 const PAGE_RANGES = {
-  2: [1, 30],   // scrape pages 1 → 30 of tier 2
-  // 3: [5, 20],    // scrape pages 5 → 20 of tier 3
+  1: [15, 61], 
+//   2: [7, 30], // scrape pages 1 → 30 of tier 2
+//   2: [6, 30]
 };
 
-// --- JsonBin Helpers ---
-async function loadFromJsonBin() {
-  try {
-    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
-      headers: { "X-Master-Key": API_KEY },
-    });
-    if (!res.ok) throw new Error(`JsonBin load failed: ${res.status}`);
-    const json = await res.json();
-    return json.record || [];
-  } catch (err) {
-    console.log("⚠️ Could not load from JsonBin, starting fresh.", err.message);
-    return [];
-  }
-}
-
-async function saveToJsonBin(data) {
-  const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Master-Key": API_KEY,
-    },
-    body: JSON.stringify(data, null, 2),
-  });
-
-  if (!res.ok) {
-    const error = await res.text();
-    console.error("❌ Failed to save to JsonBin:", error);
-  } else {
-    console.log("✅ Successfully saved to JsonBin");
-  }
+// --- MongoDB Setup ---
+let db, cardsCollection;
+async function connectMongo() {
+  const client = new MongoClient(MONGO_URI);
+  await client.connect();
+  db = client.db(DB_NAME);
+  cardsCollection = db.collection(COLLECTION_NAME);
+  console.log("✅ Connected to MongoDB Atlas");
 }
 
 // --- ScrapingAnt request ---
 async function fetchHtml(url) {
-  const apiUrl = `https://api.scrapingant.com/v2/general?url=${encodeURIComponent(url)}&browser=true&x-api-key=${SCRAPING_KEY}&wait_for_selector=.card-main`;
+  const apiUrl = `https://api.scrapingant.com/v2/general?url=${encodeURIComponent(
+    url
+  )}&browser=true&x-api-key=${SCRAPING_KEY}&wait_for_selector=.card-main`;
 
   const res = await fetch(apiUrl);
   if (!res.ok) throw new Error(`ScrapingAnt failed: ${res.status}`);
@@ -89,10 +69,25 @@ async function scrapeCardPage(url) {
     };
 
     console.log("✅ Scraped card:", card);
+
+    // save immediately to Mongo
+    await cardsCollection.updateOne(
+      { url: card.url }, // filter
+      { $set: card },    // update
+      { upsert: true }   // insert if not exists
+    );
+
     return card;
   } catch (err) {
     console.log(`⚠️ Failed scraping ${url}: ${err.message}`);
-    return { url, name: null, tier: null, series: null, img: null, maker: null };
+    return {
+      url,
+      name: null,
+      tier: null,
+      series: null,
+      img: null,
+      maker: null,
+    };
   }
 }
 
@@ -123,6 +118,13 @@ async function scrapeAllPages(existingUrls) {
             const card = await scrapeCardPage(link);
             newCards.push(card);
             existingUrls.add(link);
+
+            // also save to local backup incrementally
+            fs.writeFileSync(
+              DATA_FILE,
+              JSON.stringify([...existingUrls], null, 2)
+            );
+
             await new Promise((r) => setTimeout(r, 800)); // small delay
           }
         }
@@ -139,17 +141,13 @@ async function scrapeAllPages(existingUrls) {
 
 // --- Run scraper ---
 async function runScraper() {
-  let allCards = await loadFromJsonBin();
-  console.log(`Loaded ${allCards.length} cards from JsonBin`);
+  // load existing URLs from Mongo
+  const existingCards = await cardsCollection.find({}, { projection: { url: 1 } }).toArray();
+  const existingUrls = new Set(existingCards.map((c) => c.url));
+  console.log(`Loaded ${existingUrls.size} existing cards from Mongo`);
 
-  const existingUrls = new Set(allCards.map((c) => c.url));
   const newCards = await scrapeAllPages(existingUrls);
-
-  allCards.push(...newCards);
-  fs.writeFileSync(DATA_FILE, JSON.stringify(allCards, null, 2)); // local backup
-  console.log(`✅ Added ${newCards.length} new cards — total now ${allCards.length}`);
-
-  await saveToJsonBin(allCards);
+  console.log(`✅ Added ${newCards.length} new cards`);
 }
 
 // === Keep Alive Server ===
@@ -160,18 +158,40 @@ app.get("/", (req, res) => {
   res.send("✅ Gura Shoob scraper is alive!");
 });
 
-app.get("/download", (req, res) => {
-  const filePath = path.resolve("cards.json");
-  res.download(filePath, "cards.json", (err) => {
-    if (err) {
-      console.error("❌ Error sending file:", err);
-      res.status(500).send("Could not download file.");
-    }
-  });
+// === API routes ===
+
+// Get all cards
+app.get("/api/cards", async (req, res) => {
+  try {
+    const cards = await cardsCollection.find({}).toArray();
+    res.json(cards);
+  } catch (err) {
+    console.error("❌ Failed to fetch cards:", err.message);
+    res.status(500).json({ error: "Failed to fetch cards" });
+  }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+// Get card by name (case insensitive)
+app.get("/api/cards/:name", async (req, res) => {
+  try {
+    const name = req.params.name;
+    const card = await cardsCollection.findOne({
+      name: { $regex: new RegExp("^" + name + "$", "i") },
+    });
+
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    res.json(card);
+  } catch (err) {
+    console.error("❌ Failed to fetch card:", err.message);
+    res.status(500).json({ error: "Failed to fetch card" });
+  }
+});
+
+app.listen(PORT, "0.0.0.0", async () => {
   console.log(`✅ Keep-alive server running on port ${PORT}`);
+
+  // connect to Mongo first
+  await connectMongo();
 
   // run the scraper when the server starts
   runScraper();
