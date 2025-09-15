@@ -6,7 +6,7 @@ import express from "express";
 import { MongoClient } from "mongodb";
 
 // --- CONFIG ---
-const SCRAPING_KEY = `802680f701144d6088b4bfb3501948a6`; // hmyeah
+const SCRAPING_KEY = `36b773dbcc43425b917e5ca78ebe51d2`; // aakgura
 const MONGO_URI = "mongodb+srv://Ryou:12345@shoob-cards.6bphku9.mongodb.net/?retryWrites=true&w=majority&appName=Shoob-Cards";
 const DB_NAME = "shoob";
 const COLLECTION_NAME = "cards";
@@ -14,7 +14,7 @@ const COLLECTION_NAME = "cards";
 const DATA_FILE = "cards.json"; // optional local backup
 const TIERS = [1];              // add tiers like [1,2,3,4,5,6,'S']
 const PAGE_RANGES = {
-  1: [15, 61], 
+  1: [61, 121], 
 //   2: [7, 30], // scrape pages 1 → 30 of tier 2
 //   2: [6, 30]
 };
