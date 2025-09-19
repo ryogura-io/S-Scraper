@@ -8,7 +8,7 @@ import { MongoClient } from "mongodb";
 // --- CONFIG ---
 const SCRAPING_KEY = `966a97dd1a3349a5b59de862e1e50308`; // chr11
 const MONGO_URI = "mongodb+srv://Ryou:12345@shoob-cards.6bphku9.mongodb.net/?retryWrites=true&w=majority&appName=Shoob-Cards";
-const DB_NAME = "shoob";
+const DB_NAME = "cards-backup";
 const COLLECTION_NAME = "cards";
 
 const DATA_FILE = "cards.json"; // optional local backup
