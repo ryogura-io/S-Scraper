@@ -55,7 +55,8 @@ async function scrapeCardPage(url) {
       tier:
         $("ol.breadcrumb-new li:nth-child(3) span[itemprop='name']")
           .text()
-          ?.trim() || null,
+    ?.trim()
+    .replace("Tier ", "") || null,
       series:
         $("ol.breadcrumb-new li:nth-child(4) span[itemprop='name']")
           .text()
